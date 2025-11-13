@@ -1,36 +1,57 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# GPX Grid Challenge
 
-## Getting Started
+A Next.js (App Router) playground for chasing grid coverage on top of OpenStreetMap. Upload GPX tracks, categorize them per sport, and watch the grid fill up. Built with Tailwind CSS, Clerk authentication, and React Leaflet.
 
-First, run the development server:
+## Features
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+- **Clerk authentication** with protected routes, modal sign-in, and user dropdown.
+- **OpenStreetMap canvas** rendered with `react-leaflet`, including live grid lines and highlighted cells for every GPX the user shows.
+- **GPX ingestion** in the browser – parsing is done client-side to avoid uploading raw files elsewhere.
+- **Multi-sport management** (walking, hiking, multiple ski disciplines, and three cycling types) with per-sport statistics.
+- **Responsive dashboard** containing a sidebar for activities, grid controls, map, and statistics panel.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Prerequisites
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- Node.js 18.18+ (Next.js 16 requirement).
+- `pnpm` (the repo already uses the lockfile); `npm`/`yarn` will also work if you prefer manually updating scripts.
+- A Clerk project with publishable + secret keys.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Environment Setup
 
-## Learn More
+1. Copy the sample environment file and fill in your keys from the [Clerk dashboard](https://clerk.com/):
 
-To learn more about Next.js, take a look at the following resources:
+   ```bash
+   cp .env.example .env.local
+   ```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+   | Variable | Description |
+   | --- | --- |
+   | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Public key used by the browser bundle |
+   | `CLERK_SECRET_KEY` | Secret key used by Next.js middleware/server components |
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+2. Install dependencies:
 
-## Deploy on Vercel
+   ```bash
+   pnpm install
+   ```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+3. Run the dev server:
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+   ```bash
+   pnpm dev
+   ```
+
+   Open [http://localhost:3000](http://localhost:3000) and sign in with your Clerk user. Upload one or multiple `.gpx` files, choose the sport category, and adjust the grid size. The map automatically colors every cell visited by the activities you keep visible.
+
+## Tech Stack Highlights
+
+- **Next.js 16 App Router** with TypeScript + Tailwind CSS v4.
+- **Clerk** middleware + React components to keep the dashboard behind a login.
+- **React Leaflet & Leaflet** for map rendering and vector overlays.
+- **Local GPX parsing** using the browser `DOMParser` for tracks and routes.
+
+## Future Ideas
+
+- Persist activities in a database keyed by Clerk user IDs.
+- Add shareable heatmaps or challenge leaderboards.
+- Support FIT/TCX uploads and auto sport detection.
