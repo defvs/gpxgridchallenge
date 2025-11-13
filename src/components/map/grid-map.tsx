@@ -22,6 +22,7 @@ interface GridMapProps {
   activities: Activity[];
   cells: CellEntry[];
   gridSize: number;
+  variant?: "card" | "full";
 }
 
 const FitBounds = ({ bounds }: { bounds: LatLngBoundsLiteral | null }) => {
@@ -166,7 +167,12 @@ const polylineOptions = {
   opacity: 0.85,
 };
 
-const GridMap = ({ activities, cells, gridSize }: GridMapProps) => {
+const GridMap = ({ activities, cells, gridSize, variant = "card" }: GridMapProps) => {
+  const containerClasses =
+    variant === "card"
+      ? "relative z-0 h-full min-h-[480px] w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
+      : "relative z-0 h-full w-full overflow-hidden bg-slate-950";
+
   const visibleActivities = useMemo(
     () => activities.filter((activity) => activity.visible && activity.points.length),
     [activities],
@@ -202,7 +208,7 @@ const GridMap = ({ activities, cells, gridSize }: GridMapProps) => {
   }, [visibleActivities]);
 
   return (
-    <div className="relative h-full min-h-[480px] w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+    <div className={containerClasses}>
       <MapContainer
         center={DEFAULT_CENTER}
         zoom={9}
@@ -229,7 +235,13 @@ const GridMap = ({ activities, cells, gridSize }: GridMapProps) => {
         ))}
       </MapContainer>
       {!visibleActivities.length ? (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-white/70 text-center text-sm text-slate-600">
+        <div
+          className={`pointer-events-none absolute inset-0 flex items-center justify-center text-center text-sm ${
+            variant === "card"
+              ? "bg-white/70 text-slate-600"
+              : "bg-slate-950/60 text-white"
+          }`}
+        >
           Upload a GPX file to start filling the grid.
         </div>
       ) : null}
