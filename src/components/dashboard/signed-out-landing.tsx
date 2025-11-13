@@ -1,9 +1,18 @@
 "use client";
 
 import { SignInButton } from "@clerk/nextjs";
+import dynamic from "next/dynamic";
 
-import GridMap from "../map/grid-map";
+import type { GridMapProps } from "../map/grid-map";
 import { DEFAULT_GRID_SIZE } from "../../lib/constants";
+
+const GridMap = dynamic<GridMapProps>(
+  () => import("../map/grid-map"),
+  {
+    ssr: false,
+    loading: () => <div className="h-full w-full bg-slate-900/20" />,
+  },
+);
 
 const SignedOutLanding = () => (
   <div className="relative h-[100dvh] min-h-screen w-full overflow-hidden bg-slate-950">

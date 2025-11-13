@@ -18,7 +18,7 @@ import type { Activity, CellEntry } from "../../lib/types";
 
 const DEFAULT_CENTER: LatLngTuple = [46.2044, 6.1432];
 
-interface GridMapProps {
+export interface GridMapProps {
   activities: Activity[];
   cells: CellEntry[];
   gridSize: number;

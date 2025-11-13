@@ -28,6 +28,7 @@ A Next.js (App Router) playground for chasing grid coverage on top of OpenStreet
    | --- | --- |
    | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Public key used by the browser bundle |
    | `CLERK_SECRET_KEY` | Secret key used by Next.js middleware/server components |
+   | `DEV_STORAGE_USER_ID` (optional) | Static user id for local testing if you want to skip Clerk sign-in |
 
 2. Install dependencies:
 

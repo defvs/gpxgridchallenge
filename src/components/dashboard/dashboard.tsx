@@ -1,12 +1,12 @@
 "use client";
 
 import { UserButton } from "@clerk/nextjs";
+import dynamic from "next/dynamic";
 import type { LatLngTuple } from "leaflet";
 import type { ChangeEvent } from "react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-import GridMap from "../map/grid-map";
-import { calculatePolylineDistance } from "../../lib/geo";
+import type { GridMapProps } from "../map/grid-map";
 import { buildCellIndex } from "../../lib/grid";
 import { getSportMeta, SPORT_OPTIONS } from "../../lib/sports";
 import type { Sport } from "../../lib/sports";
@@ -20,10 +20,24 @@ interface StatusMessage {
   tone: MessageTone;
 }
 
+interface ParsedGpx {
+  name: string;
+  points: LatLngTuple[];
+  rawGpx: string;
+}
+
+interface UploadDraft {
+  name: string;
+  sport: Sport;
+  fileName: string;
+  points: LatLngTuple[];
+  rawGpx: string;
+}
+
 const formatDistance = (distanceKm: number) =>
   distanceKm < 1 ? `${(distanceKm * 1000).toFixed(0)} m` : `${distanceKm.toFixed(1)} km`;
 
-const parseGpx = async (file: File) => {
+const parseGpx = async (file: File): Promise<ParsedGpx> => {
   const text = await file.text();
   const parser = new DOMParser();
   const xml = parser.parseFromString(text, "application/xml");
@@ -54,8 +68,33 @@ const parseGpx = async (file: File) => {
     xml.querySelector("name")?.textContent?.trim() ||
     file.name.replace(/\.gpx$/i, "");
 
-  return { name, points };
+  return { name, points, rawGpx: text };
 };
+
+const TrashIcon = ({ className }: { className?: string }) => (
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth={1.5}
+    className={className}
+    aria-hidden
+  >
+    <path
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673A2.25 2.25 0 0 1 15.916 21.75H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79l-1.021-.166m15.477 0a48.108 48.108 0 0 0-3.478-.397m-12-.768A48.11 48.11 0 0 1 8.478 4.5m0 0L9.2 3.16A2.25 2.25 0 0 1 11.078 2.25h1.844A2.25 2.25 0 0 1 15.8 3.16l.723 1.34m-8.045 0a48.667 48.667 0 0 0 8.445 0"
+    />
+  </svg>
+);
+
+const GridMap = dynamic<GridMapProps>(
+  () => import("../map/grid-map"),
+  {
+    ssr: false,
+    loading: () => <div className="h-full w-full bg-slate-900/10" />,
+  },
+);
 
 const Dashboard = () => {
   const [activities, setActivities] = useState<Activity[]>([]);
@@ -64,7 +103,58 @@ const Dashboard = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [showStatsModal, setShowStatsModal] = useState(false);
   const [editingSportId, setEditingSportId] = useState<string | null>(null);
+  const [isLoadingActivities, setIsLoadingActivities] = useState(true);
+  const [isUploading, setIsUploading] = useState(false);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [deletingActivityId, setDeletingActivityId] = useState<string | null>(null);
+  const deleteIntentTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const gridSize = DEFAULT_GRID_SIZE;
+
+  useEffect(() => {
+    let isMounted = true;
+    const loadActivities = async () => {
+      try {
+        const response = await fetch("/api/activities");
+        if (!response.ok) {
+          throw new Error("Server returned an error");
+        }
+        const payload = (await response.json()) as { activities?: Activity[] };
+        if (payload.activities && isMounted) {
+          setActivities(
+            payload.activities.map((activity) => ({
+              ...activity,
+              visible: activity.visible ?? true,
+            })),
+          );
+        }
+      } catch (error) {
+        if (isMounted) {
+          setMessage({
+            text: `Unable to load stored activities. ${(error as Error).message}`,
+            tone: "error",
+          });
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoadingActivities(false);
+        }
+      }
+    };
+
+    loadActivities();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (deleteIntentTimeout.current) {
+        clearTimeout(deleteIntentTimeout.current);
+      }
+    };
+  }, []);
 
   const allCells = useMemo(
     () => buildCellIndex(activities, gridSize, true),
@@ -149,37 +239,91 @@ const Dashboard = () => {
     setEditingSportId(null);
   };
 
+  const resetDeleteIntent = () => {
+    if (deleteIntentTimeout.current) {
+      clearTimeout(deleteIntentTimeout.current);
+      deleteIntentTimeout.current = null;
+    }
+    setPendingDeleteId(null);
+  };
+
+  const handleDeleteActivityRequest = async (activity: Activity) => {
+    if (deletingActivityId && deletingActivityId !== activity.id) {
+      return;
+    }
+
+    if (pendingDeleteId === activity.id) {
+      setDeletingActivityId(activity.id);
+      try {
+        const response = await fetch(`/api/activities/${activity.id}`, {
+          method: "DELETE",
+        });
+        if (!response.ok) {
+          let reason = "Unable to delete activity.";
+          try {
+            const payload = (await response.json()) as { error?: string };
+            if (payload?.error) {
+              reason = payload.error;
+            }
+          } catch {
+            // Ignore JSON errors; handled via reason fallback.
+          }
+          throw new Error(reason);
+        }
+
+        setActivities((prev) => prev.filter((item) => item.id !== activity.id));
+        setMessage({
+          text: `"${activity.name}" deleted.`,
+          tone: "success",
+        });
+      } catch (error) {
+        setMessage({
+          text: `Failed to delete activity: ${(error as Error).message}`,
+          tone: "error",
+        });
+      } finally {
+        setDeletingActivityId(null);
+        resetDeleteIntent();
+      }
+      return;
+    }
+
+    if (deleteIntentTimeout.current) {
+      clearTimeout(deleteIntentTimeout.current);
+    }
+
+    setPendingDeleteId(activity.id);
+    deleteIntentTimeout.current = setTimeout(() => {
+      setPendingDeleteId((current) => (current === activity.id ? null : current));
+      deleteIntentTimeout.current = null;
+    }, 2000);
+  };
+
   const handleUpload = async (event: ChangeEvent<HTMLInputElement>) => {
     const { files } = event.target;
-    if (!files?.length) {
+    const selectedFiles = files ? Array.from(files) : [];
+    if (!selectedFiles.length || isUploading) {
       return;
     }
 
     const currentSport = selectedSport;
-    const importResults: Activity[] = [];
+    const drafts: UploadDraft[] = [];
     const failures: string[] = [];
 
     await Promise.all(
-      Array.from(files).map(async (file) => {
+      selectedFiles.map(async (file) => {
         try {
           const parsed = await parseGpx(file);
           if (parsed.points.length < 2) {
             throw new Error("This file does not contain enough coordinates.");
           }
 
-          const distanceKm = calculatePolylineDistance(parsed.points);
-          const meta = getSportMeta(currentSport);
-
-          importResults.push({
-            id: crypto.randomUUID(),
+          drafts.push({
             name: parsed.name,
             sport: currentSport,
-            color: meta.color,
-            visible: true,
             fileName: file.name,
             points: parsed.points,
-            distanceKm,
-            createdAt: Date.now(),
+            rawGpx: parsed.rawGpx,
           });
         } catch (error) {
           failures.push(`${file.name}: ${(error as Error).message}`);
@@ -187,23 +331,65 @@ const Dashboard = () => {
       }),
     );
 
-    setActivities((prev) => [...importResults, ...prev]);
+    event.target.value = "";
 
-    if (failures.length) {
-      setMessage({
-        text: `Some files could not be processed:\n${failures.join("\n")}`,
-        tone: "error",
-      });
-    } else if (importResults.length) {
-      setMessage({
-        text: `${importResults.length} activit${
-          importResults.length === 1 ? "y" : "ies"
-        } imported as ${getSportMeta(currentSport).label}.`,
-        tone: "success",
-      });
+    if (!drafts.length) {
+      if (failures.length) {
+        setMessage({
+          text: `Some files could not be processed:\n${failures.join("\n")}`,
+          tone: "error",
+        });
+      }
+      return;
     }
 
-    event.target.value = "";
+    try {
+      setIsUploading(true);
+      const response = await fetch("/api/activities", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ activities: drafts }),
+      });
+
+      let payload: { activities?: Activity[]; error?: string } | null = null;
+      try {
+        payload = (await response.json()) as typeof payload;
+      } catch {
+        // Ignore JSON errors; handled below.
+      }
+
+      if (!response.ok || !payload?.activities) {
+        const reason = payload?.error ?? "Unable to store activities.";
+        throw new Error(reason);
+      }
+
+      setActivities((prev) => [...payload.activities!, ...prev]);
+
+      const successText = `${payload.activities.length} activit${
+        payload.activities.length === 1 ? "y" : "ies"
+      } saved as ${getSportMeta(currentSport).label}.`;
+
+      if (failures.length) {
+        setMessage({
+          text: `${successText}\nSome files could not be processed:\n${failures.join("\n")}`,
+          tone: failures.length === selectedFiles.length ? "error" : "success",
+        });
+      } else {
+        setMessage({
+          text: successText,
+          tone: "success",
+        });
+      }
+    } catch (error) {
+      setMessage({
+        text: `Failed to save activities: ${(error as Error).message}`,
+        tone: "error",
+      });
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   const hasActivities = activities.length > 0;
@@ -256,8 +442,12 @@ const Dashboard = () => {
               accept=".gpx"
               multiple
               onChange={handleUpload}
-              className="block w-full cursor-pointer rounded-xl border border-dashed border-slate-300 bg-white/80 px-4 py-6 text-center text-sm text-slate-500 hover:border-slate-400"
+              disabled={isUploading}
+              className="block w-full cursor-pointer rounded-xl border border-dashed border-slate-300 bg-white/80 px-4 py-6 text-center text-sm text-slate-500 hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-60"
             />
+            {isUploading ? (
+              <p className="text-xs text-slate-500">Uploading and saving activities...</p>
+            ) : null}
           </div>
         </label>
         {message ? (
@@ -279,7 +469,11 @@ const Dashboard = () => {
       </div>
 
       <div className="mt-4 flex-1 overflow-y-auto space-y-3 pr-1">
-        {!hasActivities ? (
+        {isLoadingActivities ? (
+          <p className="rounded-2xl border border-slate-100/70 bg-white/80 p-4 text-sm text-slate-600">
+            Loading stored activities...
+          </p>
+        ) : !hasActivities ? (
           <p className="rounded-2xl border border-slate-100/70 bg-white/80 p-4 text-sm text-slate-600">
             No activities yet. Choose a sport, upload one or more GPX files, and they will
             appear here with quick stats.
@@ -289,6 +483,8 @@ const Dashboard = () => {
                 const meta = getSportMeta(activity.sport);
                 const coveredCells = activityCellCounts[activity.id] ?? 0;
                 const isEditingSport = editingSportId === activity.id;
+                const isAwaitingDeleteConfirmation = pendingDeleteId === activity.id;
+                const isDeletingActivity = deletingActivityId === activity.id;
                 return (
                   <div
                     key={activity.id}
@@ -329,7 +525,33 @@ const Dashboard = () => {
                           </button>
                         )}
                         <span>• {formatDistance(activity.distanceKm)}</span>
-                        <span>• {coveredCells} cells</span>
+                        <span className="inline-flex items-center gap-1">
+                          • {coveredCells} cells
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteActivityRequest(activity)}
+                            disabled={isDeletingActivity}
+                            aria-label={
+                              isAwaitingDeleteConfirmation
+                                ? "Click again to delete this activity"
+                                : "Delete this activity"
+                            }
+                            title={
+                              isAwaitingDeleteConfirmation
+                                ? "Click again to delete this activity"
+                                : "Delete this activity"
+                            }
+                            className={`rounded-full p-0.5 transition ${
+                              isDeletingActivity
+                                ? "cursor-wait text-slate-400 opacity-60"
+                                : isAwaitingDeleteConfirmation
+                                  ? "bg-rose-50 text-rose-600"
+                                  : "text-slate-400 hover:bg-rose-50 hover:text-rose-500"
+                            }`}
+                          >
+                            <TrashIcon className="h-3.5 w-3.5" />
+                          </button>
+                        </span>
                       </p>
                     </div>
                 <button
