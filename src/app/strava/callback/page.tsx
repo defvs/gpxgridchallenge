@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 type StatusVariant = "pending" | "success" | "error";
+type ExchangeResponse = { error?: string };
 
 const StatusBadge = ({ status }: { status: StatusVariant }) => {
   if (status === "success") {
@@ -30,7 +31,41 @@ const StatusBadge = ({ status }: { status: StatusVariant }) => {
   );
 };
 
-const StravaCallbackPage = () => {
+const StravaCallbackLayout = ({ status, message }: { status: StatusVariant; message: string }) => (
+  <main className="flex min-h-screen items-center justify-center bg-slate-950 px-6 py-16">
+    <div className="w-full max-w-lg rounded-3xl border border-white/10 bg-white/95 p-8 text-center shadow-2xl">
+      <StatusBadge status={status} />
+      <h1 className="mt-4 text-2xl font-semibold text-slate-900">
+        {status === "success"
+          ? "All set!"
+          : status === "error"
+            ? "Something went wrong"
+            : "Finishing up..."}
+      </h1>
+      <p className={`mt-4 text-sm ${status === "error" ? "text-rose-600" : "text-slate-600"}`}>
+        {message}
+      </p>
+      <div className="mt-6 flex flex-wrap justify-center gap-3">
+        <Link
+          href="/"
+          className="rounded-full border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-white"
+        >
+          Back to dashboard
+        </Link>
+        {status === "error" ? (
+          <a
+            href="/api/strava/authorize"
+            className="rounded-full bg-orange-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-400"
+          >
+            Try again
+          </a>
+        ) : null}
+      </div>
+    </div>
+  </main>
+);
+
+const StravaCallbackContent = () => {
   const searchParams = useSearchParams();
   const [status, setStatus] = useState<StatusVariant>("pending");
   const [message, setMessage] = useState("Completing Strava authorization...");
@@ -61,9 +96,9 @@ const StravaCallbackPage = () => {
           body: JSON.stringify({ code, state }),
         });
 
-        let payload: { error?: string } | null = null;
+        let payload: ExchangeResponse | null = null;
         try {
-          payload = (await response.json()) as typeof payload;
+          payload = (await response.json()) as ExchangeResponse;
         } catch {
           // Ignore JSON errors; handled via status below.
         }
@@ -84,39 +119,13 @@ const StravaCallbackPage = () => {
     connect();
   }, [searchParams]);
 
-  return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-950 px-6 py-16">
-      <div className="w-full max-w-lg rounded-3xl border border-white/10 bg-white/95 p-8 text-center shadow-2xl">
-        <StatusBadge status={status} />
-        <h1 className="mt-4 text-2xl font-semibold text-slate-900">
-          {status === "success"
-            ? "All set!"
-            : status === "error"
-              ? "Something went wrong"
-              : "Finishing up..."}
-        </h1>
-        <p className={`mt-4 text-sm ${status === "error" ? "text-rose-600" : "text-slate-600"}`}>
-          {message}
-        </p>
-        <div className="mt-6 flex flex-wrap justify-center gap-3">
-          <Link
-            href="/"
-            className="rounded-full border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 transition hover:bg-white"
-          >
-            Back to dashboard
-          </Link>
-          {status === "error" ? (
-            <a
-              href="/api/strava/authorize"
-              className="rounded-full bg-orange-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-400"
-            >
-              Try again
-            </a>
-          ) : null}
-        </div>
-      </div>
-    </main>
-  );
+  return <StravaCallbackLayout status={status} message={message} />;
 };
+
+const StravaCallbackPage = () => (
+  <Suspense fallback={<StravaCallbackLayout status="pending" message="Completing Strava authorization..." />}>
+    <StravaCallbackContent />
+  </Suspense>
+);
 
 export default StravaCallbackPage;

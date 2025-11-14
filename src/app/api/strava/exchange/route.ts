@@ -9,7 +9,7 @@ interface ExchangePayload {
 }
 
 export const POST = async (request: Request) => {
-  const userId = resolveUserId();
+  const userId = await resolveUserId();
   if (!userId) {
     return unauthorized();
   }

@@ -432,8 +432,11 @@ export const syncStravaActivities = async (userId: string): Promise<StravaSyncRe
       seenIds.add(numericId);
     }
 
-    const startDate = activity.start_date
-      ? Math.floor(new Date(activity.start_date as string).getTime() / 1000)
+    const startDateSource = activity.start_date;
+    const startDate = startDateSource
+      ? Math.floor(
+          (startDateSource instanceof Date ? startDateSource : new Date(startDateSource)).getTime() / 1000,
+        )
       : 0;
     if (startDate > newestCursor) {
       newestCursor = startDate;

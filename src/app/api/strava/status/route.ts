@@ -4,7 +4,7 @@ import { getRequiredStravaScope, getStravaStatus } from "../../../../server/stra
 import { resolveUserId, unauthorized } from "../../activities/helpers";
 
 export const GET = async () => {
-  const userId = resolveUserId();
+  const userId = await resolveUserId();
   if (!userId) {
     return unauthorized();
   }

@@ -35,7 +35,7 @@ const sanitizePoints = (value: unknown): LatLngTuple[] => {
 };
 
 export const GET = async () => {
-  const userId = resolveUserId();
+  const userId = await resolveUserId();
   if (!userId) {
     return unauthorized();
   }
@@ -58,7 +58,7 @@ interface RawActivityPayload {
 }
 
 export const POST = async (request: Request) => {
-  const userId = resolveUserId();
+  const userId = await resolveUserId();
   if (!userId) {
     return unauthorized();
   }

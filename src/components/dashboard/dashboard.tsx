@@ -47,6 +47,17 @@ interface StravaStatusSummary {
   lastSync?: StravaSyncSummary;
 }
 
+type StravaSyncResponsePayload = {
+  activities?: Activity[];
+  summary?: StravaSyncSummary;
+  error?: string;
+};
+
+type StoreActivitiesResponsePayload = {
+  activities?: Activity[];
+  error?: string;
+};
+
 const formatDistance = (distanceKm: number) =>
   distanceKm < 1 ? `${(distanceKm * 1000).toFixed(0)} m` : `${distanceKm.toFixed(1)} km`;
 
@@ -562,9 +573,9 @@ const Dashboard = () => {
       const response = await fetch("/api/strava/sync", {
         method: "POST",
       });
-      let payload: { activities?: Activity[]; summary?: StravaSyncSummary; error?: string } | null = null;
+      let payload: StravaSyncResponsePayload | null = null;
       try {
-        payload = (await response.json()) as typeof payload;
+        payload = (await response.json()) as StravaSyncResponsePayload;
       } catch {
         // Response may not include JSON on failure; handled below.
       }
@@ -657,9 +668,9 @@ const Dashboard = () => {
         body: JSON.stringify({ activities: drafts }),
       });
 
-      let payload: { activities?: Activity[]; error?: string } | null = null;
+      let payload: StoreActivitiesResponsePayload | null = null;
       try {
-        payload = (await response.json()) as typeof payload;
+        payload = (await response.json()) as StoreActivitiesResponsePayload;
       } catch {
         // Ignore JSON errors; handled below.
       }

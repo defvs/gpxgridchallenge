@@ -4,7 +4,7 @@ import { buildAuthorizeUrl, isStravaConfigured } from "../../../../server/strava
 import { resolveUserId, unauthorized } from "../../activities/helpers";
 
 export const GET = async () => {
-  const userId = resolveUserId();
+  const userId = await resolveUserId();
   if (!userId) {
     return unauthorized();
   }

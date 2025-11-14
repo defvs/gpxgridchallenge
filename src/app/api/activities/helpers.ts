@@ -9,12 +9,12 @@ export const unauthorized = () =>
 export const invalid = (message: string) =>
   NextResponse.json({ error: message }, { status: 400 });
 
-export const resolveUserId = () => {
+export const resolveUserId = async (): Promise<string | null> => {
   if (!isClerkConfigured) {
     return singleUserId;
   }
 
-  const { userId } = auth();
+  const { userId } = await auth();
   if (userId) {
     return userId;
   }

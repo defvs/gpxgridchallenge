@@ -11,7 +11,7 @@ export const DELETE = async (
   _request: Request,
   context: { params: Promise<Params> },
 ) => {
-  const userId = resolveUserId();
+  const userId = await resolveUserId();
   if (!userId) {
     return unauthorized();
   }

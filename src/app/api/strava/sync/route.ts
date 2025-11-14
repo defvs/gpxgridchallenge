@@ -5,7 +5,7 @@ import { resolveUserId, unauthorized } from "../../activities/helpers";
 import { toActivityResponse } from "../../activities/to-activity-response";
 
 export const POST = async () => {
-  const userId = resolveUserId();
+  const userId = await resolveUserId();
   if (!userId) {
     return unauthorized();
   }
