@@ -4,7 +4,7 @@ import { UserButton } from "@clerk/nextjs";
 import dynamic from "next/dynamic";
 import type { LatLngTuple } from "leaflet";
 import type { ChangeEvent } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { GridMapProps } from "../map/grid-map";
 import { buildCellIndex } from "../../lib/grid";
@@ -34,8 +34,23 @@ interface UploadDraft {
   rawGpx: string;
 }
 
+interface StravaSyncSummary {
+  attemptedAt: number;
+  imported: number;
+  considered: number;
+}
+
+interface StravaStatusSummary {
+  configured: boolean;
+  connected: boolean;
+  athleteName?: string;
+  lastSync?: StravaSyncSummary;
+}
+
 const formatDistance = (distanceKm: number) =>
   distanceKm < 1 ? `${(distanceKm * 1000).toFixed(0)} m` : `${distanceKm.toFixed(1)} km`;
+
+const formatTimestamp = (value: number) => new Date(value).toLocaleString();
 
 const parseGpx = async (file: File): Promise<ParsedGpx> => {
   const text = await file.text();
@@ -105,6 +120,11 @@ const Dashboard = () => {
   const [editingSportId, setEditingSportId] = useState<string | null>(null);
   const [isLoadingActivities, setIsLoadingActivities] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
+  const [stravaStatus, setStravaStatus] = useState<StravaStatusSummary | null>(null);
+  const [stravaScope, setStravaScope] = useState<string | null>(null);
+  const [isLoadingStravaStatus, setIsLoadingStravaStatus] = useState(true);
+  const [isSyncingStrava, setIsSyncingStrava] = useState(false);
+  const [stravaStatusError, setStravaStatusError] = useState<string | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [deletingActivityId, setDeletingActivityId] = useState<string | null>(null);
   const deleteIntentTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -147,6 +167,32 @@ const Dashboard = () => {
       isMounted = false;
     };
   }, []);
+
+  const fetchStravaStatus = useCallback(async () => {
+    setIsLoadingStravaStatus(true);
+    setStravaStatusError(null);
+    try {
+      const response = await fetch("/api/strava/status");
+      if (!response.ok) {
+        throw new Error("Server returned an error");
+      }
+      const payload = (await response.json()) as {
+        status?: StravaStatusSummary;
+        scope?: string;
+      };
+      setStravaStatus(payload.status ?? null);
+      setStravaScope(payload.scope ?? null);
+    } catch (error) {
+      setStravaStatus(null);
+      setStravaStatusError((error as Error).message);
+    } finally {
+      setIsLoadingStravaStatus(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchStravaStatus();
+  }, [fetchStravaStatus]);
 
   useEffect(() => {
     return () => {
@@ -297,6 +343,60 @@ const Dashboard = () => {
       setPendingDeleteId((current) => (current === activity.id ? null : current));
       deleteIntentTimeout.current = null;
     }, 2000);
+  };
+
+  const handleStravaConnect = () => {
+    window.location.href = "/api/strava/authorize";
+  };
+
+  const handleStravaSync = async () => {
+    if (isSyncingStrava) {
+      return;
+    }
+    setIsSyncingStrava(true);
+    try {
+      const response = await fetch("/api/strava/sync", {
+        method: "POST",
+      });
+      let payload: { activities?: Activity[]; summary?: StravaSyncSummary; error?: string } | null = null;
+      try {
+        payload = (await response.json()) as typeof payload;
+      } catch {
+        // Response may not include JSON on failure; handled below.
+      }
+
+      if (!response.ok || !payload) {
+        const reason = payload?.error ?? "Unable to sync from Strava.";
+        throw new Error(reason);
+      }
+
+      const imported = payload.activities ?? [];
+      if (imported.length) {
+        setActivities((prev) => [...imported, ...prev]);
+      }
+
+      await fetchStravaStatus();
+
+      const summary = payload.summary;
+      const summaryText =
+        summary && typeof summary.considered === "number"
+          ? ` Checked ${summary.considered} activit${summary.considered === 1 ? "y" : "ies"}.`
+          : "";
+
+      setMessage({
+        text: imported.length
+          ? `Imported ${imported.length} Strava activit${imported.length === 1 ? "y" : "ies"}.${summaryText}`
+          : `Strava sync completed but no new activities were available.${summaryText}`,
+        tone: "success",
+      });
+    } catch (error) {
+      setMessage({
+        text: `Strava sync failed: ${(error as Error).message}`,
+        tone: "error",
+      });
+    } finally {
+      setIsSyncingStrava(false);
+    }
   };
 
   const handleUpload = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -466,6 +566,94 @@ const Dashboard = () => {
             </span>
           </button>
         ) : null}
+      </div>
+      <div className="mt-4 rounded-2xl border border-slate-100/70 bg-white/80 p-4 shadow-sm">
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <p className="text-sm font-semibold text-slate-900">Strava sync</p>
+            <p
+              className={`text-xs ${
+                stravaStatusError ? "text-rose-600" : "text-slate-500"
+              }`}
+            >
+              {stravaStatusError
+                ? "Unable to load Strava status."
+                : isLoadingStravaStatus
+                  ? "Checking your Strava connection..."
+                  : !stravaStatus
+                    ? "Connect Strava to import activities."
+                    : !stravaStatus.configured
+                      ? "Server missing Strava credentials."
+                      : stravaStatus.connected
+                        ? stravaStatus.athleteName
+                          ? `Connected as ${stravaStatus.athleteName}`
+                          : "Connected to Strava"
+                        : "Connect your Strava account to import activities."}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => fetchStravaStatus()}
+            disabled={isLoadingStravaStatus}
+            className="rounded-full border border-slate-200 px-3 py-1 text-xs font-medium text-slate-500 transition hover:bg-white disabled:opacity-60"
+          >
+            Refresh
+          </button>
+        </div>
+        <p
+          className={`mt-3 text-xs ${
+            stravaStatusError ? "text-rose-600" : "text-slate-600"
+          }`}
+        >
+          {stravaStatusError
+            ? stravaStatusError
+            : !stravaStatus
+              ? "Authorize Strava to pull your recorded tracks directly into this dashboard."
+              : !stravaStatus.configured
+                ? "Set STRAVA_CLIENT_ID, STRAVA_CLIENT_SECRET, and STRAVA_REDIRECT_URI to enable syncing."
+                : stravaStatus.connected && stravaStatus.lastSync
+                  ? `Last sync ${formatTimestamp(stravaStatus.lastSync.attemptedAt)} · Imported ${stravaStatus.lastSync.imported} of ${stravaStatus.lastSync.considered} checked.`
+                  : stravaStatus.connected
+                    ? "Strava connected. Run your first sync to copy recent activities."
+                    : "Use the button below to connect Strava and import your GPX history."}
+        </p>
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          {stravaStatus && stravaStatus.configured ? (
+            stravaStatus.connected ? (
+              <>
+                <button
+                  type="button"
+                  onClick={handleStravaSync}
+                  disabled={isSyncingStrava}
+                  className="rounded-full bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-500 disabled:opacity-60"
+                >
+                  {isSyncingStrava ? "Syncing..." : "Sync from Strava"}
+                </button>
+                <p className="text-[11px] text-slate-500">
+                  Scope: {stravaScope ?? "activity:read_all"}
+                </p>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={handleStravaConnect}
+                  disabled={isLoadingStravaStatus}
+                  className="rounded-full bg-orange-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-400 disabled:opacity-60"
+                >
+                  Connect Strava
+                </button>
+                <p className="text-[11px] text-slate-500">
+                  Scope: {stravaScope ?? "activity:read_all"}
+                </p>
+              </>
+            )
+          ) : (
+            <p className="text-[11px] text-amber-600">
+              Configure STRAVA_* environment variables to enable syncing.
+            </p>
+          )}
+        </div>
       </div>
 
       <div className="mt-4 flex-1 overflow-y-auto space-y-3 pr-1">

@@ -1,16 +1,15 @@
 import type { LatLngTuple } from "leaflet";
 import { NextResponse } from "next/server";
 
-import { getSportMeta, SPORT_OPTIONS } from "../../../lib/sports";
+import { SPORT_OPTIONS } from "../../../lib/sports";
 import type { Sport } from "../../../lib/sports";
-import type { Activity } from "../../../lib/types";
 import {
   getActivities,
   storeActivities,
-  type ActivityDTO,
   type ActivityInput,
 } from "../../../server/activity-storage";
 import { invalid, resolveUserId, unauthorized } from "./helpers";
+import { toActivityResponse } from "./to-activity-response";
 
 const VALID_SPORTS = new Set<Sport>(SPORT_OPTIONS.map((option) => option.value));
 
@@ -33,21 +32,6 @@ const sanitizePoints = (value: unknown): LatLngTuple[] => {
   });
 
   return points;
-};
-
-const toActivityResponse = (dto: ActivityDTO): Activity => {
-  const meta = getSportMeta(dto.sport);
-  return {
-    id: dto.id,
-    name: dto.name,
-    sport: dto.sport,
-    color: meta.color,
-    visible: true,
-    fileName: dto.fileName,
-    points: dto.points,
-    distanceKm: dto.distanceKm,
-    createdAt: dto.createdAt,
-  };
 };
 
 export const GET = async () => {
