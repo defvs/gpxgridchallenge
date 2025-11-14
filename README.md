@@ -49,9 +49,3 @@ Chase every map tile you have ever crossed. GPX Grid Challenge is a Next.js dash
 1. Create an application at [Strava](https://www.strava.com/settings/api) with your local redirect URL.
 2. Fill in the Strava environment variables described above and restart `pnpm dev` so they are picked up.
 3. Connect your account from the "Strava sync" card in the dashboard to pull recent activities; duplicates are ignored automatically.
-
-## Future Ideas
-
-- Persist activity history in a hosted database keyed by Clerk users.
-- Share grid progress via public profiles or leaderboards.
-- Accept FIT/TCX uploads with automatic sport detection.
