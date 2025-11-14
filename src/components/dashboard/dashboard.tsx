@@ -2,8 +2,8 @@
 
 import { UserButton } from "@clerk/nextjs";
 import dynamic from "next/dynamic";
-import type { LatLngTuple } from "leaflet";
-import type { ChangeEvent } from "react";
+import type { LatLngTuple, Map as LeafletMap } from "leaflet";
+import type { ChangeEvent, MouseEvent as ReactMouseEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { GridMapProps } from "../map/grid-map";
@@ -51,6 +51,14 @@ const formatDistance = (distanceKm: number) =>
   distanceKm < 1 ? `${(distanceKm * 1000).toFixed(0)} m` : `${distanceKm.toFixed(1)} km`;
 
 const formatTimestamp = (value: number) => new Date(value).toLocaleString();
+
+const SORT_OPTIONS = [
+  { value: "distance", label: "Length" },
+  { value: "date", label: "Date" },
+  { value: "title", label: "Title" },
+] as const;
+
+type ActivitySort = (typeof SORT_OPTIONS)[number]["value"];
 
 const parseGpx = async (file: File): Promise<ParsedGpx> => {
   const text = await file.text();
@@ -103,6 +111,31 @@ const TrashIcon = ({ className }: { className?: string }) => (
   </svg>
 );
 
+const EyeIcon = ({ className, hidden }: { className?: string; hidden?: boolean }) => (
+  <svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth={1.5}
+    className={className}
+    aria-hidden
+  >
+    <path
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      d="M1.458 12C2.732 7.943 6.523 5 11 5s8.268 2.943 9.542 7c-1.274 4.057-5.065 7-9.542 7s-8.268-2.943-9.542-7z"
+    />
+    <path
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      d="M11 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"
+    />
+    {hidden ? (
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4 4l14 16" />
+    ) : null}
+  </svg>
+);
+
 const GridMap = dynamic<GridMapProps>(
   () => import("../map/grid-map"),
   {
@@ -127,7 +160,12 @@ const Dashboard = () => {
   const [stravaStatusError, setStravaStatusError] = useState<string | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [deletingActivityId, setDeletingActivityId] = useState<string | null>(null);
+  const [sortMode, setSortMode] = useState<ActivitySort>("date");
+  const [isSortMenuOpen, setIsSortMenuOpen] = useState(false);
+  const [groupBySport, setGroupBySport] = useState(false);
+  const [mapInstance, setMapInstance] = useState<LeafletMap | null>(null);
   const deleteIntentTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sortMenuRef = useRef<HTMLDivElement | null>(null);
   const gridSize = DEFAULT_GRID_SIZE;
 
   useEffect(() => {
@@ -202,6 +240,27 @@ const Dashboard = () => {
     };
   }, []);
 
+  useEffect(() => {
+    if (!isSortMenuOpen) {
+      return;
+    }
+
+    const handleClick = (event: MouseEvent) => {
+      if (!sortMenuRef.current) {
+        return;
+      }
+      if (!sortMenuRef.current.contains(event.target as Node)) {
+        setIsSortMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClick);
+
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+    };
+  }, [isSortMenuOpen]);
+
   const allCells = useMemo(
     () => buildCellIndex(activities, gridSize, true),
     [activities, gridSize],
@@ -220,6 +279,40 @@ const Dashboard = () => {
     });
     return counts;
   }, [allCells]);
+
+  const sortedActivities = useMemo(() => {
+    const list = [...activities];
+    list.sort((a, b) => {
+      if (sortMode === "distance") {
+        return b.distanceKm - a.distanceKm;
+      }
+      if (sortMode === "title") {
+        return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+      }
+      return b.createdAt - a.createdAt;
+    });
+    return list;
+  }, [activities, sortMode]);
+
+  const groupedActivities = useMemo(() => {
+    if (!groupBySport) {
+      return [] as Array<{ sport: Sport; label: string; activities: Activity[] }>;
+    }
+
+    const perSportMap = new Map<Sport, Activity[]>();
+    sortedActivities.forEach((activity) => {
+      if (!perSportMap.has(activity.sport)) {
+        perSportMap.set(activity.sport, []);
+      }
+      perSportMap.get(activity.sport)!.push(activity);
+    });
+
+    return SPORT_OPTIONS.filter((option) => perSportMap.has(option.value)).map((option) => ({
+      sport: option.value,
+      label: option.label,
+      activities: perSportMap.get(option.value)!,
+    }));
+  }, [groupBySport, sortedActivities]);
 
   const stats = useMemo(() => {
     const totalDistanceKm = activities.reduce(
@@ -257,6 +350,14 @@ const Dashboard = () => {
     [stats.perSport],
   );
 
+  const handleZoomIn = () => {
+    mapInstance?.zoomIn();
+  };
+
+  const handleZoomOut = () => {
+    mapInstance?.zoomOut();
+  };
+
   const handleToggle = (id: string) => {
     setActivities((prev) =>
       prev.map((activity) =>
@@ -273,6 +374,41 @@ const Dashboard = () => {
         visible: !allVisible,
       })),
     );
+  };
+
+  const handleGroupVisibilityToggle = (sport: Sport, exclusive: boolean) => {
+    setActivities((prev) => {
+      if (exclusive) {
+        return prev.map((activity) => ({
+          ...activity,
+          visible: activity.sport === sport,
+        }));
+      }
+
+      const groupActivities = prev.filter((activity) => activity.sport === sport);
+      const groupAllVisible = groupActivities.every((activity) => activity.visible);
+
+      return prev.map((activity) =>
+        activity.sport === sport
+          ? {
+              ...activity,
+              visible: !groupAllVisible,
+            }
+          : activity,
+      );
+    });
+  };
+
+  const handleGroupVisibilityClick = (sport: Sport, event: ReactMouseEvent<HTMLButtonElement>) => {
+    const exclusive = event.ctrlKey || event.metaKey;
+    event.preventDefault();
+    event.stopPropagation();
+    handleGroupVisibilityToggle(sport, exclusive);
+  };
+
+  const handleSortSelection = (value: ActivitySort) => {
+    setSortMode(value);
+    setIsSortMenuOpen(false);
   };
 
   const handleSportUpdate = (id: string, sport: Sport) => {
@@ -493,20 +629,158 @@ const Dashboard = () => {
   };
 
   const hasActivities = activities.length > 0;
-  const renderSidebarContent = (onClose?: () => void) => (
-    <div className="flex h-full flex-col">
-      <div className="flex items-start justify-between gap-2">
-        <div>
-          <h2 className="text-lg font-semibold text-slate-900">Activities</h2>
-          <p className="text-sm text-slate-500">
-            Upload GPX tracks and categorize them.
+
+  const renderActivityItem = (activity: Activity) => {
+    const meta = getSportMeta(activity.sport);
+    const coveredCells = activityCellCounts[activity.id] ?? 0;
+    const isEditingSport = editingSportId === activity.id;
+    const isAwaitingDeleteConfirmation = pendingDeleteId === activity.id;
+    const isDeletingActivity = deletingActivityId === activity.id;
+
+    return (
+      <div
+        key={activity.id}
+        className="flex items-start justify-between rounded-2xl border border-slate-100/80 bg-white/80 p-3 shadow-sm"
+      >
+        <div className="flex flex-1 flex-col gap-1">
+          <div className="flex items-center gap-2">
+            <span
+              className="inline-block h-2.5 w-6 rounded-full"
+              style={{ backgroundColor: activity.color }}
+            />
+            <p className="font-medium text-slate-900">{activity.name}</p>
+          </div>
+          <p className="flex flex-wrap items-center gap-1 text-xs text-slate-500">
+            {isEditingSport ? (
+              <select
+                value={activity.sport}
+                autoFocus
+                className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs text-slate-700 focus:border-slate-400 focus:outline-none"
+                onChange={(event) => handleSportUpdate(activity.id, event.target.value as Sport)}
+                onBlur={() =>
+                  setEditingSportId((current) => (current === activity.id ? null : current))
+                }
+              >
+                {SPORT_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setEditingSportId(activity.id)}
+                className="cursor-pointer rounded-full border border-transparent px-2 py-0.5 text-left font-medium text-slate-600 transition hover:border-slate-200 hover:text-slate-900"
+              >
+                {meta.label}
+              </button>
+            )}
+            <span>• {formatDistance(activity.distanceKm)}</span>
+            <span className="inline-flex items-center gap-1">
+              • {coveredCells} cells
+              <button
+                type="button"
+                onClick={() => handleDeleteActivityRequest(activity)}
+                disabled={isDeletingActivity}
+                aria-label={
+                  isAwaitingDeleteConfirmation
+                    ? "Click again to delete this activity"
+                    : "Delete this activity"
+                }
+                title={
+                  isAwaitingDeleteConfirmation
+                    ? "Click again to delete this activity"
+                    : "Delete this activity"
+                }
+                className={`rounded-full p-0.5 transition ${
+                  isDeletingActivity
+                    ? "cursor-wait text-slate-400 opacity-60"
+                    : isAwaitingDeleteConfirmation
+                      ? "bg-rose-50 text-rose-600"
+                      : "text-slate-400 hover:bg-rose-50 hover:text-rose-500"
+                }`}
+              >
+                <TrashIcon className="h-3.5 w-3.5" />
+              </button>
+            </span>
           </p>
         </div>
+        <button
+          type="button"
+          onClick={() => handleToggle(activity.id)}
+          className={`cursor-pointer rounded-full border px-2.5 py-1 text-xs font-semibold transition ${
+            activity.visible
+              ? "border-slate-200 text-slate-600 hover:bg-white"
+              : "border-slate-200 text-slate-400 hover:text-slate-600"
+          }`}
+          title={activity.visible ? "Hide activity" : "Show activity"}
+        >
+          {activity.visible ? "👁" : "🚫"}
+        </button>
+      </div>
+    );
+  };
+
+  const renderSidebarContent = (onClose?: () => void) => {
+    const activeSortLabel = SORT_OPTIONS.find((option) => option.value === sortMode)?.label ?? "Date";
+
+    return (
+      <div className="flex h-full flex-col">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-slate-900">Activities</h2>
+        </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative" ref={sortMenuRef}>
+              <button
+                type="button"
+                aria-haspopup="true"
+                aria-expanded={isSortMenuOpen}
+                onClick={() => setIsSortMenuOpen((current) => !current)}
+                className="cursor-pointer rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-600 transition hover:bg-white"
+              >
+                Sort: {activeSortLabel}
+              </button>
+              {isSortMenuOpen ? (
+                <div className="absolute right-0 z-10 mt-1 w-40 rounded-xl border border-slate-200 bg-white p-1 shadow-lg">
+                  {SORT_OPTIONS.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => handleSortSelection(option.value)}
+                      className={`w-full rounded-lg px-2 py-1 text-left text-xs font-medium transition ${
+                        option.value === sortMode
+                          ? "bg-slate-100 text-slate-900"
+                          : "text-slate-600 hover:bg-slate-50"
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setGroupBySport((current) => !current);
+                setIsSortMenuOpen(false);
+              }}
+              className={`cursor-pointer rounded-full border px-3 py-1 text-xs font-medium transition ${
+                groupBySport
+                  ? "border-slate-900 bg-slate-900 text-white"
+                  : "border-slate-300 text-slate-600 hover:bg-white"
+              }`}
+            >
+              {groupBySport ? "Ungroup" : "Group by type"}
+            </button>
+          </div>
           <button
             type="button"
             onClick={handleToggleAll}
-            className="rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-600 transition hover:bg-white cursor-pointer"
+            className="cursor-pointer rounded-full border border-slate-300 px-3 py-1 text-xs font-medium text-slate-600 transition hover:bg-white"
           >
             {activities.every((activity) => activity.visible) ? "Hide all" : "Show all"}
           </button>
@@ -629,9 +903,6 @@ const Dashboard = () => {
                 >
                   {isSyncingStrava ? "Syncing..." : "Sync from Strava"}
                 </button>
-                <p className="text-[11px] text-slate-500">
-                  Scope: {stravaScope ?? "activity:read_all"}
-                </p>
               </>
             ) : (
               <>
@@ -666,101 +937,64 @@ const Dashboard = () => {
             No activities yet. Choose a sport, upload one or more GPX files, and they will
             appear here with quick stats.
           </p>
-        ) : (
-          activities.map((activity) => {
-                const meta = getSportMeta(activity.sport);
-                const coveredCells = activityCellCounts[activity.id] ?? 0;
-                const isEditingSport = editingSportId === activity.id;
-                const isAwaitingDeleteConfirmation = pendingDeleteId === activity.id;
-                const isDeletingActivity = deletingActivityId === activity.id;
-                return (
-                  <div
-                    key={activity.id}
-                    className="flex items-start justify-between rounded-2xl border border-slate-100/80 bg-white/80 p-3 shadow-sm"
-                  >
-                    <div className="flex flex-1 flex-col gap-1">
-                      <div className="flex items-center gap-2">
-                        <span
-                          className="inline-block h-2.5 w-6 rounded-full"
-                          style={{ backgroundColor: activity.color }}
-                        />
-                        <p className="font-medium text-slate-900">{activity.name}</p>
-                      </div>
-                      <p className="flex flex-wrap items-center gap-1 text-xs text-slate-500">
-                        {isEditingSport ? (
-                          <select
-                            value={activity.sport}
-                            autoFocus
-                            className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs text-slate-700 focus:border-slate-400 focus:outline-none"
-                            onChange={(event) => handleSportUpdate(activity.id, event.target.value as Sport)}
-                            onBlur={() =>
-                              setEditingSportId((current) => (current === activity.id ? null : current))
-                            }
-                          >
-                            {SPORT_OPTIONS.map((option) => (
-                              <option key={option.value} value={option.value}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </select>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => setEditingSportId(activity.id)}
-                            className="cursor-pointer rounded-full border border-transparent px-2 py-0.5 text-left font-medium text-slate-600 transition hover:border-slate-200 hover:text-slate-900"
-                          >
-                            {meta.label}
-                          </button>
-                        )}
-                        <span>• {formatDistance(activity.distanceKm)}</span>
-                        <span className="inline-flex items-center gap-1">
-                          • {coveredCells} cells
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteActivityRequest(activity)}
-                            disabled={isDeletingActivity}
-                            aria-label={
-                              isAwaitingDeleteConfirmation
-                                ? "Click again to delete this activity"
-                                : "Delete this activity"
-                            }
-                            title={
-                              isAwaitingDeleteConfirmation
-                                ? "Click again to delete this activity"
-                                : "Delete this activity"
-                            }
-                            className={`rounded-full p-0.5 transition ${
-                              isDeletingActivity
-                                ? "cursor-wait text-slate-400 opacity-60"
-                                : isAwaitingDeleteConfirmation
-                                  ? "bg-rose-50 text-rose-600"
-                                  : "text-slate-400 hover:bg-rose-50 hover:text-rose-500"
-                            }`}
-                          >
-                            <TrashIcon className="h-3.5 w-3.5" />
-                          </button>
-                        </span>
+        ) : groupBySport ? (
+          <>
+            {groupedActivities.map((group) => {
+              const groupAllVisible = group.activities.every((activity) => activity.visible);
+              const groupHasVisibleActivities = group.activities.some((activity) => activity.visible);
+              const totalDistance = group.activities.reduce(
+                (sum, activity) => sum + activity.distanceKm,
+                0,
+              );
+              const groupCells = group.activities.reduce(
+                (sum, activity) => sum + (activityCellCounts[activity.id] ?? 0),
+                0,
+              );
+              const groupActivityLabel =
+                group.activities.length === 1 ? "activity" : "activities";
+
+              return (
+                <div
+                  key={group.sport}
+                  className="space-y-2 rounded-2xl border border-slate-100/80 bg-white/70 p-3 shadow-sm"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900">{group.label}</p>
+                      <p className="text-xs text-slate-500">
+                        {group.activities.length} {groupActivityLabel} • {formatDistance(totalDistance)} • {groupCells} cells
                       </p>
                     </div>
-                <button
-                  type="button"
-                  onClick={() => handleToggle(activity.id)}
-                  className={`cursor-pointer rounded-full border px-2.5 py-1 text-xs font-semibold transition ${
-                    activity.visible
-                      ? "border-slate-200 text-slate-600 hover:bg-white"
-                      : "border-slate-200 text-slate-400 hover:text-slate-600"
-                  }`}
-                  title={activity.visible ? "Hide activity" : "Show activity"}
-                >
-                  {activity.visible ? "👁" : "🚫"}
-                </button>
-              </div>
-            );
-          })
+                    <button
+                      type="button"
+                      aria-pressed={!groupAllVisible}
+                      onClick={(event) => handleGroupVisibilityClick(group.sport, event)}
+                      className={`cursor-pointer rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                        groupAllVisible
+                          ? "border-slate-200 text-slate-600 hover:bg-white"
+                          : "border-slate-200 text-slate-400 hover:text-slate-600"
+                      }`}
+                      title={`${groupAllVisible ? "Hide" : "Show"} ${group.label} activities. Ctrl+Click to show only this type.`}
+                    >
+                      <EyeIcon className="h-4 w-4" hidden={!groupAllVisible} />
+                    </button>
+                  </div>
+                  {groupHasVisibleActivities ? (
+                    <div className="space-y-3">
+                      {group.activities.map((activity) => renderActivityItem(activity))}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+          </>
+        ) : (
+          sortedActivities.map((activity) => renderActivityItem(activity))
         )}
       </div>
     </div>
   );
+  };
 
   return (
     <div className="relative h-[100dvh] min-h-screen w-full overflow-hidden bg-slate-950">
@@ -770,6 +1004,7 @@ const Dashboard = () => {
           cells={Array.from(visibleCells.values())}
           gridSize={gridSize}
           variant="full"
+          onMapReady={setMapInstance}
         />
       </div>
 
@@ -786,6 +1021,24 @@ const Dashboard = () => {
           >
             View stats
           </button>
+          <div className="flex overflow-hidden rounded-full border border-white/40 bg-white/90 text-slate-900 shadow-lg backdrop-blur">
+            <button
+              type="button"
+              aria-label="Zoom in"
+              onClick={handleZoomIn}
+              className="cursor-pointer px-3 py-2 text-sm font-semibold transition hover:bg-white"
+            >
+              +
+            </button>
+            <button
+              type="button"
+              aria-label="Zoom out"
+              onClick={handleZoomOut}
+              className="cursor-pointer border-l border-white/40 px-3 py-2 text-sm font-semibold transition hover:bg-white"
+            >
+              -
+            </button>
+          </div>
           <button
             type="button"
             onClick={() => setIsSidebarOpen(true)}

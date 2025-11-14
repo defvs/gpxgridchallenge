@@ -1,6 +1,11 @@
 "use client";
 
-import type { LatLngBounds, LatLngBoundsLiteral, LatLngTuple } from "leaflet";
+import type {
+  LatLngBounds,
+  LatLngBoundsLiteral,
+  LatLngTuple,
+  Map as LeafletMap,
+} from "leaflet";
 import { useEffect, useMemo, useState } from "react";
 import {
   MapContainer,
@@ -17,25 +22,15 @@ import type { Sport } from "../../lib/sports";
 import type { Activity, CellEntry } from "../../lib/types";
 
 const DEFAULT_CENTER: LatLngTuple = [46.2044, 6.1432];
+const MIN_GRID_ZOOM = 10;
 
 export interface GridMapProps {
   activities: Activity[];
   cells: CellEntry[];
   gridSize: number;
   variant?: "card" | "full";
+  onMapReady?: (map: LeafletMap | null) => void;
 }
-
-const FitBounds = ({ bounds }: { bounds: LatLngBoundsLiteral | null }) => {
-  const map = useMap();
-
-  useEffect(() => {
-    if (bounds) {
-      map.fitBounds(bounds, { padding: [32, 32] });
-    }
-  }, [bounds, map]);
-
-  return null;
-};
 
 const getGridLineCoords = (
   bounds: LatLngBoundsLiteral | null,
@@ -112,6 +107,37 @@ const GridLines = ({ gridSize }: { gridSize: number }) => {
   );
 };
 
+const GridVisibilityController = ({
+  onVisibilityChange,
+}: {
+  onVisibilityChange: (visible: boolean) => void;
+}) => {
+  const map = useMapEvents({
+    zoomend: () => {
+      onVisibilityChange(map.getZoom() >= MIN_GRID_ZOOM);
+    },
+  });
+
+  useEffect(() => {
+    onVisibilityChange(map.getZoom() >= MIN_GRID_ZOOM);
+  }, [map, onVisibilityChange]);
+
+  return null;
+};
+
+const MapReadyEffect = ({ onReady }: { onReady?: (map: LeafletMap | null) => void }) => {
+  const map = useMap();
+
+  useEffect(() => {
+    onReady?.(map);
+    return () => {
+      onReady?.(null);
+    };
+  }, [map, onReady]);
+
+  return null;
+};
+
 const getDominantSport = (sports: CellEntry["sports"]) => {
   let leadingSport: Sport | null = null;
   let leadingValue = -Infinity;
@@ -167,7 +193,13 @@ const polylineOptions = {
   opacity: 0.85,
 };
 
-const GridMap = ({ activities, cells, gridSize, variant = "card" }: GridMapProps) => {
+const GridMap = ({
+  activities,
+  cells,
+  gridSize,
+  variant = "card",
+  onMapReady,
+}: GridMapProps) => {
   const containerClasses =
     variant === "card"
       ? "relative z-0 h-full min-h-[480px] w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
@@ -178,34 +210,7 @@ const GridMap = ({ activities, cells, gridSize, variant = "card" }: GridMapProps
     [activities],
   );
 
-  const bounds = useMemo(() => {
-    if (!visibleActivities.length) {
-      return null;
-    }
-
-    let minLat = Number.POSITIVE_INFINITY;
-    let minLng = Number.POSITIVE_INFINITY;
-    let maxLat = Number.NEGATIVE_INFINITY;
-    let maxLng = Number.NEGATIVE_INFINITY;
-
-    visibleActivities.forEach((activity) => {
-      activity.points.forEach(([lat, lng]) => {
-        minLat = Math.min(minLat, lat);
-        minLng = Math.min(minLng, lng);
-        maxLat = Math.max(maxLat, lat);
-        maxLng = Math.max(maxLng, lng);
-      });
-    });
-
-    if (!Number.isFinite(minLat) || !Number.isFinite(minLng)) {
-      return null;
-    }
-
-    return [
-      [minLat, minLng],
-      [maxLat, maxLng],
-    ] as LatLngBoundsLiteral;
-  }, [visibleActivities]);
+  const [isGridVisible, setIsGridVisible] = useState(true);
 
   return (
     <div className={containerClasses}>
@@ -214,15 +219,17 @@ const GridMap = ({ activities, cells, gridSize, variant = "card" }: GridMapProps
         zoom={9}
         minZoom={3}
         scrollWheelZoom
+        zoomControl={false}
         className="h-full w-full"
       >
-        {bounds ? <FitBounds bounds={bounds} /> : null}
+        <MapReadyEffect onReady={onMapReady} />
+        <GridVisibilityController onVisibilityChange={setIsGridVisible} />
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
-        <GridLines gridSize={gridSize} />
-        <FilledCellsLayer cells={cells} />
+        {isGridVisible ? <GridLines gridSize={gridSize} /> : null}
+        {isGridVisible ? <FilledCellsLayer cells={cells} /> : null}
         {visibleActivities.map((activity) => (
           <Polyline
             key={activity.id}
@@ -234,6 +241,11 @@ const GridMap = ({ activities, cells, gridSize, variant = "card" }: GridMapProps
           />
         ))}
       </MapContainer>
+      {!isGridVisible ? (
+        <div className="pointer-events-none absolute bottom-4 left-1/2 z-[1000] -translate-x-1/2 rounded-full bg-slate-900/90 px-4 py-2 text-xs font-medium text-white shadow-lg">
+          Zoom in to see your grid
+        </div>
+      ) : null}
       {!visibleActivities.length ? (
         <div
           className={`pointer-events-none absolute inset-0 flex items-center justify-center text-center text-sm ${
