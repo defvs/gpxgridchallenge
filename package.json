@@ -10,7 +10,9 @@
   },
   "dependencies": {
     "@clerk/nextjs": "^6.35.1",
+    "@tmcw/togeojson": "^7.1.2",
     "@types/leaflet": "^1.9.21",
+    "@xmldom/xmldom": "^0.8.11",
     "leaflet": "^1.9.4",
     "next": "16.0.3",
     "react": "19.2.0",
@@ -19,6 +21,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/geojson": "^7946.0.16",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

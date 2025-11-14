@@ -4,22 +4,27 @@ import path from "node:path";
 import { gzip } from "node:zlib";
 import { promisify } from "node:util";
 
+import { gpx } from "@tmcw/togeojson";
+import { DOMParser } from "@xmldom/xmldom";
+import type { FeatureCollection } from "geojson";
 import type { LatLngTuple } from "leaflet";
 
 import { calculatePolylineDistance } from "../lib/geo";
 import type { Sport } from "../lib/sports";
 
 const gzipAsync = promisify(gzip);
+const domParser = new DOMParser();
 
 const STORAGE_ROOT = path.join(process.cwd(), "storage", "activities");
+const GEOJSON_SUBDIR = "geojson";
 
 const getUserDir = (userId: string) => path.join(STORAGE_ROOT, userId);
 const getMetaFile = (userId: string) => path.join(getUserDir(userId), "activities.json");
-const getGpxDir = (userId: string) => path.join(getUserDir(userId), "gpx");
+const getGeoJsonDir = (userId: string) => path.join(getUserDir(userId), GEOJSON_SUBDIR);
 
 const POINT_SCALE = 1e5;
 
-interface ActivityRecord {
+interface ActivityRecordBase {
   id: string;
   name: string;
   sport: Sport;
@@ -27,8 +32,19 @@ interface ActivityRecord {
   distanceKm: number;
   createdAt: number;
   encodedPoints: string;
-  gpxPath: string;
 }
+
+interface LegacyActivityRecord extends ActivityRecordBase {
+  gpxPath: string;
+  geojsonPath?: undefined;
+}
+
+interface GeoJsonActivityRecord extends ActivityRecordBase {
+  geojsonPath: string;
+  gpxPath?: undefined;
+}
+
+type ActivityRecord = LegacyActivityRecord | GeoJsonActivityRecord;
 
 export interface ActivityInput {
   name: string;
@@ -49,7 +65,7 @@ export interface ActivityDTO {
 }
 
 const ensureUserDirs = async (userId: string) => {
-  await mkdir(getGpxDir(userId), { recursive: true });
+  await mkdir(getGeoJsonDir(userId), { recursive: true });
 };
 
 const encodeNumber = (value: number) => {
@@ -131,6 +147,28 @@ const decodePoints = (encoded: string): LatLngTuple[] => {
   return points;
 };
 
+const convertGpxToGeoJson = (rawGpx: string): string => {
+  const trimmed = rawGpx.trim();
+  if (!trimmed) {
+    throw new Error("Empty GPX payload");
+  }
+
+  let xmlDoc: Document;
+  try {
+    xmlDoc = domParser.parseFromString(trimmed, "text/xml");
+  } catch (error) {
+    throw new Error(`Unable to parse GPX input: ${(error as Error).message}`);
+  }
+
+  const parseErrors = xmlDoc.getElementsByTagName("parsererror");
+  if (parseErrors.length > 0) {
+    throw new Error("Invalid GPX payload");
+  }
+
+  const geojson = gpx(xmlDoc) as FeatureCollection;
+  return JSON.stringify(geojson);
+};
+
 const readRecords = async (userId: string): Promise<ActivityRecord[]> => {
   try {
     const content = await readFile(getMetaFile(userId), "utf8");
@@ -170,7 +208,7 @@ export const storeActivities = async (
   }
 
   await ensureUserDirs(userId);
-  const gpxDir = getGpxDir(userId);
+  const geoJsonDir = getGeoJsonDir(userId);
 
   const existing = await readRecords(userId);
 
@@ -180,11 +218,12 @@ export const storeActivities = async (
       const createdAt = Date.now();
       const encodedPoints = encodePoints(entry.points);
       const distanceKm = calculatePolylineDistance(entry.points);
-      const gpxFileName = `${id}.gpx.gz`;
-      const gpxPath = path.posix.join("gpx", gpxFileName);
+      const geojsonContent = convertGpxToGeoJson(entry.rawGpx);
+      const geojsonFileName = `${id}.geojson.gz`;
+      const geojsonPath = path.posix.join(GEOJSON_SUBDIR, geojsonFileName);
 
-      const compressed = await gzipAsync(Buffer.from(entry.rawGpx, "utf8"));
-      await writeFile(path.join(gpxDir, gpxFileName), compressed);
+      const compressed = await gzipAsync(Buffer.from(geojsonContent, "utf8"));
+      await writeFile(path.join(geoJsonDir, geojsonFileName), compressed);
 
       return {
         id,
@@ -194,8 +233,8 @@ export const storeActivities = async (
         distanceKm,
         createdAt,
         encodedPoints,
-        gpxPath,
-      } satisfies ActivityRecord;
+        geojsonPath,
+      } satisfies GeoJsonActivityRecord;
     }),
   );
 
@@ -226,11 +265,15 @@ export const deleteActivity = async (
   const [removed] = records.splice(index, 1);
   await writeRecords(userId, records);
 
-  try {
-    await unlink(path.join(getUserDir(userId), removed.gpxPath));
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      throw error;
+  const assetPath = "geojsonPath" in removed ? removed.geojsonPath : removed.gpxPath;
+
+  if (assetPath) {
+    try {
+      await unlink(path.join(getUserDir(userId), assetPath));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw error;
+      }
     }
   }
 
