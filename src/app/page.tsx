@@ -2,8 +2,17 @@ import { SignedIn, SignedOut } from "@clerk/nextjs";
 
 import Dashboard from "../components/dashboard/dashboard";
 import SignedOutLanding from "../components/dashboard/signed-out-landing";
+import { isClerkConfigured } from "../lib/auth-config";
 
 export default function Home() {
+  if (!isClerkConfigured) {
+    return (
+      <main className="min-h-screen w-full">
+        <Dashboard />
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen w-full">
       <SignedIn>

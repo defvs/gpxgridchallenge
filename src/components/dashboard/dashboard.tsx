@@ -144,6 +144,9 @@ const GridMap = dynamic<GridMapProps>(
   },
 );
 
+const isClerkFrontendEnabled = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
+const isStravaFrontendEnabled = process.env.NEXT_PUBLIC_STRAVA_ENABLED === "true";
+
 const SIDEBAR_WIDTH_DEFAULT = 450;
 const SIDEBAR_WIDTH_MIN = 280;
 const SIDEBAR_WIDTH_MAX = 750;
@@ -214,6 +217,10 @@ const Dashboard = () => {
   }, []);
 
   const fetchStravaStatus = useCallback(async () => {
+    if (!isStravaFrontendEnabled) {
+      return;
+    }
+
     setIsLoadingStravaStatus(true);
     setStravaStatusError(null);
     try {
@@ -236,6 +243,9 @@ const Dashboard = () => {
   }, []);
 
   useEffect(() => {
+    if (!isStravaFrontendEnabled) {
+      return;
+    }
     fetchStravaStatus();
   }, [fetchStravaStatus]);
 
@@ -537,11 +547,14 @@ const Dashboard = () => {
   };
 
   const handleStravaConnect = () => {
+    if (!isStravaFrontendEnabled) {
+      return;
+    }
     window.location.href = "/api/strava/authorize";
   };
 
   const handleStravaSync = async () => {
-    if (isSyncingStrava) {
+    if (!isStravaFrontendEnabled || isSyncingStrava) {
       return;
     }
     setIsSyncingStrava(true);
@@ -896,91 +909,93 @@ const Dashboard = () => {
           </button>
         ) : null}
       </div>
-      <div className="mt-4 rounded-2xl border border-slate-100/70 bg-white/80 p-4 shadow-sm">
-        <div className="flex items-start justify-between gap-2">
-          <div>
-            <p className="text-sm font-semibold text-slate-900">Strava sync</p>
-            <p
-              className={`text-xs ${
-                stravaStatusError ? "text-rose-600" : "text-slate-500"
-              }`}
+      {isStravaFrontendEnabled ? (
+        <div className="mt-4 rounded-2xl border border-slate-100/70 bg-white/80 p-4 shadow-sm">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <p className="text-sm font-semibold text-slate-900">Strava sync</p>
+              <p
+                className={`text-xs ${
+                  stravaStatusError ? "text-rose-600" : "text-slate-500"
+                }`}
+              >
+                {stravaStatusError
+                  ? "Unable to load Strava status."
+                  : isLoadingStravaStatus
+                    ? "Checking your Strava connection..."
+                    : !stravaStatus
+                      ? "Connect Strava to import activities."
+                      : !stravaStatus.configured
+                        ? "Server missing Strava credentials."
+                        : stravaStatus.connected
+                          ? stravaStatus.athleteName
+                            ? `Connected as ${stravaStatus.athleteName}`
+                            : "Connected to Strava"
+                          : "Connect your Strava account to import activities."}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => fetchStravaStatus()}
+              disabled={isLoadingStravaStatus}
+              className="rounded-full border border-slate-200 px-3 py-1 text-xs font-medium text-slate-500 transition hover:bg-white disabled:opacity-60"
             >
-              {stravaStatusError
-                ? "Unable to load Strava status."
-                : isLoadingStravaStatus
-                  ? "Checking your Strava connection..."
-                  : !stravaStatus
-                    ? "Connect Strava to import activities."
-                    : !stravaStatus.configured
-                      ? "Server missing Strava credentials."
-                      : stravaStatus.connected
-                        ? stravaStatus.athleteName
-                          ? `Connected as ${stravaStatus.athleteName}`
-                          : "Connected to Strava"
-                        : "Connect your Strava account to import activities."}
-            </p>
+              Refresh
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={() => fetchStravaStatus()}
-            disabled={isLoadingStravaStatus}
-            className="rounded-full border border-slate-200 px-3 py-1 text-xs font-medium text-slate-500 transition hover:bg-white disabled:opacity-60"
+          <p
+            className={`mt-3 text-xs ${
+              stravaStatusError ? "text-rose-600" : "text-slate-600"
+            }`}
           >
-            Refresh
-          </button>
-        </div>
-        <p
-          className={`mt-3 text-xs ${
-            stravaStatusError ? "text-rose-600" : "text-slate-600"
-          }`}
-        >
-          {stravaStatusError
-            ? stravaStatusError
-            : !stravaStatus
-              ? "Authorize Strava to pull your recorded tracks directly into this dashboard."
-              : !stravaStatus.configured
-                ? "Set STRAVA_CLIENT_ID, STRAVA_CLIENT_SECRET, and STRAVA_REDIRECT_URI to enable syncing."
-                : stravaStatus.connected && stravaStatus.lastSync
-                  ? `Last sync ${formatTimestamp(stravaStatus.lastSync.attemptedAt)} · Imported ${stravaStatus.lastSync.imported} of ${stravaStatus.lastSync.considered} checked.`
-                  : stravaStatus.connected
-                    ? "Strava connected. Run your first sync to copy recent activities."
-                    : "Use the button below to connect Strava and import your GPX history."}
-        </p>
-        <div className="mt-4 flex flex-wrap items-center gap-2">
-          {stravaStatus && stravaStatus.configured ? (
-            stravaStatus.connected ? (
-              <>
-                <button
-                  type="button"
-                  onClick={handleStravaSync}
-                  disabled={isSyncingStrava}
-                  className="rounded-full bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-500 disabled:opacity-60"
-                >
-                  {isSyncingStrava ? "Syncing..." : "Sync from Strava"}
-                </button>
-              </>
+            {stravaStatusError
+              ? stravaStatusError
+              : !stravaStatus
+                ? "Authorize Strava to pull your recorded tracks directly into this dashboard."
+                : !stravaStatus.configured
+                  ? "Set STRAVA_CLIENT_ID, STRAVA_CLIENT_SECRET, and STRAVA_REDIRECT_URI to enable syncing."
+                  : stravaStatus.connected && stravaStatus.lastSync
+                    ? `Last sync ${formatTimestamp(stravaStatus.lastSync.attemptedAt)} · Imported ${stravaStatus.lastSync.imported} of ${stravaStatus.lastSync.considered} checked.`
+                    : stravaStatus.connected
+                      ? "Strava connected. Run your first sync to copy recent activities."
+                      : "Use the button below to connect Strava and import your GPX history."}
+          </p>
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            {stravaStatus && stravaStatus.configured ? (
+              stravaStatus.connected ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleStravaSync}
+                    disabled={isSyncingStrava}
+                    className="rounded-full bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-500 disabled:opacity-60"
+                  >
+                    {isSyncingStrava ? "Syncing..." : "Sync from Strava"}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleStravaConnect}
+                    disabled={isLoadingStravaStatus}
+                    className="rounded-full bg-orange-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-400 disabled:opacity-60"
+                  >
+                    Connect Strava
+                  </button>
+                  <p className="text-[11px] text-slate-500">
+                    Scope: {stravaScope ?? "activity:read_all"}
+                  </p>
+                </>
+              )
             ) : (
-              <>
-                <button
-                  type="button"
-                  onClick={handleStravaConnect}
-                  disabled={isLoadingStravaStatus}
-                  className="rounded-full bg-orange-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-400 disabled:opacity-60"
-                >
-                  Connect Strava
-                </button>
-                <p className="text-[11px] text-slate-500">
-                  Scope: {stravaScope ?? "activity:read_all"}
-                </p>
-              </>
-            )
-          ) : (
-            <p className="text-[11px] text-amber-600">
-              Configure STRAVA_* environment variables to enable syncing.
-            </p>
-          )}
+              <p className="text-[11px] text-amber-600">
+                Configure STRAVA_* environment variables to enable syncing.
+              </p>
+            )}
+          </div>
         </div>
-      </div>
+      ) : null}
 
       <div className="mt-4 flex-1 overflow-y-auto space-y-3 pr-1">
         {isLoadingActivities ? (
@@ -1123,15 +1138,21 @@ const Dashboard = () => {
           >
             Activities
           </button>
-          <div className="rounded-full border border-white/40 bg-white/90 p-1 shadow-lg backdrop-blur">
-            <UserButton
-              appearance={{
-                elements: {
-                  avatarBox: "h-10 w-10",
-                },
-              }}
-            />
-          </div>
+          {isClerkFrontendEnabled ? (
+            <div className="rounded-full border border-white/40 bg-white/90 p-1 shadow-lg backdrop-blur">
+              <UserButton
+                appearance={{
+                  elements: {
+                    avatarBox: "h-10 w-10",
+                  },
+                }}
+              />
+            </div>
+          ) : (
+            <div className="rounded-full border border-white/40 bg-white/90 px-4 py-2 text-sm font-semibold text-slate-900 shadow-lg backdrop-blur">
+              Single-user mode
+            </div>
+          )}
         </div>
       </div>
 
