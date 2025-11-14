@@ -144,6 +144,10 @@ const GridMap = dynamic<GridMapProps>(
   },
 );
 
+const SIDEBAR_WIDTH_DEFAULT = 450;
+const SIDEBAR_WIDTH_MIN = 280;
+const SIDEBAR_WIDTH_MAX = 750;
+
 const Dashboard = () => {
   const [activities, setActivities] = useState<Activity[]>([]);
   const [selectedSport, setSelectedSport] = useState<Sport>(SPORT_OPTIONS[0].value);
@@ -164,8 +168,11 @@ const Dashboard = () => {
   const [isSortMenuOpen, setIsSortMenuOpen] = useState(false);
   const [groupBySport, setGroupBySport] = useState(false);
   const [mapInstance, setMapInstance] = useState<LeafletMap | null>(null);
+  const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_WIDTH_DEFAULT);
+  const [isResizingSidebar, setIsResizingSidebar] = useState(false);
   const deleteIntentTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sortMenuRef = useRef<HTMLDivElement | null>(null);
+  const sidebarRef = useRef<HTMLDivElement | null>(null);
   const gridSize = DEFAULT_GRID_SIZE;
 
   useEffect(() => {
@@ -260,6 +267,49 @@ const Dashboard = () => {
       document.removeEventListener("mousedown", handleClick);
     };
   }, [isSortMenuOpen]);
+
+  useEffect(() => {
+    if (!isResizingSidebar) {
+      return;
+    }
+
+    const handleMouseMove = (event: MouseEvent) => {
+      if (!sidebarRef.current) {
+        return;
+      }
+
+      const rect = sidebarRef.current.getBoundingClientRect();
+      const nextWidth = event.clientX - rect.left;
+      if (!Number.isFinite(nextWidth)) {
+        return;
+      }
+
+      const clampedWidth = Math.min(
+        Math.max(nextWidth, SIDEBAR_WIDTH_MIN),
+        SIDEBAR_WIDTH_MAX,
+      );
+      setSidebarWidth(clampedWidth);
+    };
+
+    const handleMouseUp = () => {
+      setIsResizingSidebar(false);
+    };
+
+    const previousUserSelect = document.body.style.userSelect;
+    const previousCursor = document.body.style.cursor;
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "ew-resize";
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+      document.body.style.userSelect = previousUserSelect;
+      document.body.style.cursor = previousCursor;
+    };
+  }, [isResizingSidebar]);
 
   const allCells = useMemo(
     () => buildCellIndex(activities, gridSize, true),
@@ -397,6 +447,11 @@ const Dashboard = () => {
           : activity,
       );
     });
+  };
+
+  const handleSidebarResizeStart = (event: ReactMouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    setIsResizingSidebar(true);
   };
 
   const handleGroupVisibilityClick = (sport: Sport, event: ReactMouseEvent<HTMLButtonElement>) => {
@@ -1009,8 +1064,30 @@ const Dashboard = () => {
       </div>
 
       <div className="pointer-events-none absolute inset-0 z-10">
-        <div className="pointer-events-auto absolute left-4 top-4 bottom-4 hidden w-full max-w-sm flex-col overflow-hidden rounded-3xl border border-white/15 bg-white/95 p-5 shadow-2xl backdrop-blur lg:flex">
-          {renderSidebarContent()}
+        <div
+          ref={sidebarRef}
+          style={{ width: sidebarWidth }}
+          className="pointer-events-auto absolute left-4 top-4 bottom-4 hidden lg:block"
+        >
+          <div className="relative h-full">
+            <div className="flex h-full flex-col overflow-hidden rounded-3xl border border-white/15 bg-white/95 p-5 shadow-2xl backdrop-blur">
+              {renderSidebarContent()}
+            </div>
+            <button
+              type="button"
+              aria-label="Resize sidebar"
+              title="Drag to resize sidebar"
+              onMouseDown={handleSidebarResizeStart}
+              className={`absolute top-1/2 -right-3 flex h-12 w-6 -translate-y-1/2 items-center justify-center rounded-full border bg-white/90 text-slate-500 shadow-lg backdrop-blur transition ${
+                isResizingSidebar
+                  ? "cursor-ew-resize border-emerald-200 bg-emerald-50"
+                  : "cursor-ew-resize border-white/60 hover:border-white"
+              }`}
+            >
+              <span className="h-6 w-0.5 rounded-full bg-slate-400" />
+              <span className="ml-1 h-6 w-0.5 rounded-full bg-slate-400" />
+            </button>
+          </div>
         </div>
 
         <div className="pointer-events-auto absolute right-4 top-4 flex flex-wrap items-center justify-end gap-2">
