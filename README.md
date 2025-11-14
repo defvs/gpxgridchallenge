@@ -13,7 +13,7 @@ Chase every map tile you have ever crossed. GPX Grid Challenge is a Next.js dash
 - Activity list sorting/grouping plus quick map controls for hiding, highlighting, or zooming to any track.
 - Optional Clerk auth: configure it for multi-user dashboards or skip it for instant single-user mode.
 - Strava sync via OAuth to import your latest efforts without manually exporting GPX files.
-- Offline-friendly local storage keeps imported activities available between sessions.
+- Offline-friendly local storage (or optional S3-compatible bucket storage) keeps imported activities available between sessions.
 
 ## Quick Start
 
@@ -32,6 +32,14 @@ Chase every map tile you have ever crossed. GPX Grid Challenge is a Next.js dash
    | `STRAVA_CLIENT_ID` / `STRAVA_CLIENT_SECRET` | OAuth credentials for Strava syncing |
    | `STRAVA_REDIRECT_URI` | Redirect URL registered in Strava (e.g. `http://localhost:3000/strava/callback`) |
    | `STRAVA_SCOPE` (optional) | Override the default `read,activity:read_all` scopes |
+   | `STORAGE_DRIVER` (optional) | Force `local` or `bucket`; otherwise auto-detected |
+   | `STORAGE_BUCKET_NAME` (optional) | Enables bucket storage when combined with credentials |
+   | `STORAGE_BUCKET_REGION` (optional) | Region for the bucket (defaults to `us-east-1`) |
+   | `STORAGE_BUCKET_ENDPOINT` (optional) | Custom endpoint (e.g. Cloudflare R2) |
+   | `STORAGE_BUCKET_PREFIX` (optional) | Folder/prefix inside the bucket for all objects |
+   | `STORAGE_BUCKET_ACCESS_KEY_ID` / `STORAGE_BUCKET_SECRET_ACCESS_KEY` | Credentials for bucket access (falls back to `AWS_*` env vars) |
+   | `STORAGE_BUCKET_SESSION_TOKEN` (optional) | Session token for temporary credentials |
+   | `STORAGE_BUCKET_FORCE_PATH_STYLE` (optional) | Set to `true` to always use path-style URLs |
 
    The Strava section in the dashboard only appears when the three required `STRAVA_*` variables above are configured.
 
@@ -43,6 +51,17 @@ Chase every map tile you have ever crossed. GPX Grid Challenge is a Next.js dash
    ```
 
 4. Visit [http://localhost:3000](http://localhost:3000), sign in with your Clerk user, or simply start uploading `.gpx` files if Clerk is disabled.
+
+## Remote bucket storage (optional)
+
+By default the server writes GPX-derived GeoJSON, Strava sync state, and activity metadata to `./storage` on the local disk. If you
+want to share data between deployments, set `STORAGE_BUCKET_NAME` along with credentials for any S3-compatible bucket. When the
+environment is configured the API routes will transparently read/write objects via signed HTTPS requests; local mode remains
+available for development or offline use.
+
+At minimum you need `STORAGE_BUCKET_NAME`, credentials (`STORAGE_BUCKET_ACCESS_KEY_ID` / `STORAGE_BUCKET_SECRET_ACCESS_KEY` or the
+standard `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`), and optionally a `STORAGE_BUCKET_REGION`. Provide `STORAGE_BUCKET_ENDPOINT`
+(plus `STORAGE_BUCKET_FORCE_PATH_STYLE=true`) when targeting providers such as Cloudflare R2 that require path-style URLs.
 
 ## Strava Sync (optional)
 

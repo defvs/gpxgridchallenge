@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import type { LatLngTuple } from "leaflet";
@@ -12,6 +11,7 @@ import stravaApi, {
 import type { Sport } from "../lib/sports";
 import type { ActivityDTO, ActivityInput } from "./activity-storage";
 import { storeActivities } from "./activity-storage";
+import { ensureStorageDir, readStorageFile, writeStorageFile } from "./storage";
 
 const STRAVA_SCOPE = process.env.STRAVA_SCOPE ?? "read,activity:read_all";
 
@@ -68,7 +68,7 @@ interface TokenExchangeResult extends RefreshTokenResponse {
   };
 }
 
-const STORAGE_ROOT = path.join(process.cwd(), "storage", "strava");
+const STORAGE_ROOT = "strava";
 const MAX_TRACKED_ACTIVITY_IDS = 500;
 const POLYLINE_SCALE = 1e5;
 const TOKEN_EXPIRY_BUFFER_SECONDS = 60;
@@ -94,15 +94,15 @@ const STRAVA_SPORT_MAP: Partial<Record<string, Sport>> = {
   EMountainBikeRide: "mountain-cycling",
 };
 
-const ensureStorageDir = async () => {
-  await mkdir(STORAGE_ROOT, { recursive: true });
+const ensureStravaStorage = async () => {
+  await ensureStorageDir(STORAGE_ROOT);
 };
 
-const getStatePath = (userId: string) => path.join(STORAGE_ROOT, `${userId}.json`);
+const getStatePath = (userId: string) => path.posix.join(STORAGE_ROOT, `${userId}.json`);
 
 const readState = async (userId: string): Promise<StoredStravaState> => {
   try {
-    const content = await readFile(getStatePath(userId), "utf8");
+    const content = await readStorageFile(getStatePath(userId), "utf8");
     const parsed = JSON.parse(content) as StoredStravaState;
     return parsed ?? {};
   } catch (error) {
@@ -114,8 +114,12 @@ const readState = async (userId: string): Promise<StoredStravaState> => {
 };
 
 const writeState = async (userId: string, state: StoredStravaState) => {
-  await ensureStorageDir();
-  await writeFile(getStatePath(userId), `${JSON.stringify(state, null, 2)}\n`, "utf8");
+  await ensureStravaStorage();
+  await writeStorageFile(
+    getStatePath(userId),
+    `${JSON.stringify(state, null, 2)}\n`,
+    { contentType: "application/json" },
+  );
 };
 
 const getBaseConfig = (): BaseStravaConfig | null => {

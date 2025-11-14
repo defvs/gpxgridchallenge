@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { gzip } from "node:zlib";
 import { promisify } from "node:util";
@@ -11,16 +10,22 @@ import type { LatLngTuple } from "leaflet";
 
 import { calculatePolylineDistance } from "../lib/geo";
 import type { Sport } from "../lib/sports";
+import {
+  deleteStorageFile,
+  ensureStorageDir,
+  readStorageFile,
+  writeStorageFile,
+} from "./storage";
 
 const gzipAsync = promisify(gzip);
 const domParser = new DOMParser();
 
-const STORAGE_ROOT = path.join(process.cwd(), "storage", "activities");
+const STORAGE_ROOT = "activities";
 const GEOJSON_SUBDIR = "geojson";
 
-const getUserDir = (userId: string) => path.join(STORAGE_ROOT, userId);
-const getMetaFile = (userId: string) => path.join(getUserDir(userId), "activities.json");
-const getGeoJsonDir = (userId: string) => path.join(getUserDir(userId), GEOJSON_SUBDIR);
+const getUserDir = (userId: string) => path.posix.join(STORAGE_ROOT, userId);
+const getMetaFile = (userId: string) => path.posix.join(getUserDir(userId), "activities.json");
+const getGeoJsonDir = (userId: string) => path.posix.join(getUserDir(userId), GEOJSON_SUBDIR);
 
 const POINT_SCALE = 1e5;
 
@@ -65,7 +70,7 @@ export interface ActivityDTO {
 }
 
 const ensureUserDirs = async (userId: string) => {
-  await mkdir(getGeoJsonDir(userId), { recursive: true });
+  await ensureStorageDir(getGeoJsonDir(userId));
 };
 
 const encodeNumber = (value: number) => {
@@ -171,7 +176,7 @@ const convertGpxToGeoJson = (rawGpx: string): string => {
 
 const readRecords = async (userId: string): Promise<ActivityRecord[]> => {
   try {
-    const content = await readFile(getMetaFile(userId), "utf8");
+    const content = await readStorageFile(getMetaFile(userId), "utf8");
     const parsed = JSON.parse(content) as ActivityRecord[];
     return Array.isArray(parsed) ? parsed : [];
   } catch (error) {
@@ -183,7 +188,11 @@ const readRecords = async (userId: string): Promise<ActivityRecord[]> => {
 };
 
 const writeRecords = async (userId: string, records: ActivityRecord[]) => {
-  await writeFile(getMetaFile(userId), `${JSON.stringify(records, null, 2)}\n`, "utf8");
+  await writeStorageFile(
+    getMetaFile(userId),
+    `${JSON.stringify(records, null, 2)}\n`,
+    { contentType: "application/json" },
+  );
 };
 
 export const getActivities = async (userId: string): Promise<ActivityDTO[]> => {
@@ -208,8 +217,6 @@ export const storeActivities = async (
   }
 
   await ensureUserDirs(userId);
-  const geoJsonDir = getGeoJsonDir(userId);
-
   const existing = await readRecords(userId);
 
   const newRecords = await Promise.all(
@@ -223,7 +230,11 @@ export const storeActivities = async (
       const geojsonPath = path.posix.join(GEOJSON_SUBDIR, geojsonFileName);
 
       const compressed = await gzipAsync(Buffer.from(geojsonContent, "utf8"));
-      await writeFile(path.join(geoJsonDir, geojsonFileName), compressed);
+      await writeStorageFile(
+        path.posix.join(getGeoJsonDir(userId), geojsonFileName),
+        compressed,
+        { contentType: "application/gzip" },
+      );
 
       return {
         id,
@@ -269,7 +280,10 @@ export const deleteActivity = async (
 
   if (assetPath) {
     try {
-      await unlink(path.join(getUserDir(userId), assetPath));
+      const targetPath = assetPath.startsWith("/")
+        ? assetPath
+        : path.posix.join(getUserDir(userId), assetPath);
+      await deleteStorageFile(targetPath);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
         throw error;
